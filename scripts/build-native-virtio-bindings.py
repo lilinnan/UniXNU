@@ -17,7 +17,11 @@ parser.add_argument('--component', choices=['NativeVirtioBlock', 'NativeRamBlock
 parser.add_argument('--directory', type=Path, default=ROOT / 'build/native-virtio-block')
 args = parser.parse_args()
 out = args.directory.resolve()
-audit = json.loads((ROOT / 'build/storage-abi/interface-audit.json').read_text())
+audit_path = ROOT / 'build/storage-abi/interface-audit.json'
+if not audit_path.is_file():
+    # The recorded audit is not shipped: derive it from the original-kernelcache candidate in build/native-prelink.
+    subprocess.run([sys.executable, str(ROOT / 'scripts/audit-storage-interface.py')], cwd=ROOT, check=True)
+audit = json.loads(audit_path.read_text())
 component = args.component
 mangled = str(len(component)) + component
 obj_path = out / (component + '.o')
