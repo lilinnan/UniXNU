@@ -200,6 +200,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Show and upload logs on failure
+        if: failure()
+        run: |
+          grep -n -B5 -A10 "error:" out/*/logs/*.log | head -200 || true
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-logs
+          path: out/*/logs/**
+          retention-days: 7
+
       - name: Remove proprietary inputs
         if: always()
         run: |
