@@ -19,7 +19,7 @@ def _open(url):
     token = os.environ.get('GITHUB_TOKEN')
     if token and url.startswith('https://api.github.com/'):
         request.add_header('Authorization', f'Bearer {token}')
-    return _open(request)
+    return urllib.request.urlopen(request, timeout=30)
 
 def restore(entry, destination=DESTINATION, tag=TAG):
     if entry['type'] != 'file' or not entry['name'].endswith('.h'):
