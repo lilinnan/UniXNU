@@ -86,7 +86,7 @@ jobs:
           fsck_apfs -n "/dev/$(cat /tmp/volume)"
           hdiutil detach "$DEV"
 
-      - name: Pack, grow and mark Setup done
+      - name: Pack, mark Setup done and grow
         env:
           GROW: ${{ inputs.grow_gib }}
           SKIP: ${{ inputs.skip_setup }}
@@ -94,13 +94,15 @@ jobs:
           mkdir -p seed
           python3 drivers/DarwinBoot/Test/packed_ramdisk.py build/owner-data-fixture/owner-data-32.cdr seed/data.dbr
           CUR=seed/data.dbr
+          # Setup first, on the 32 MiB seed: seed-data-skip-setup.py reads the whole raw image into memory, which a
+          # grown (hundreds of GiB) seed does not fit. Growing afterwards keeps the content and the volume UUID.
+          if [ "$SKIP" = "true" ]; then
+            python3 scripts/seed-data-skip-setup.py "$CUR" seed/data-setup.dbr
+            CUR=seed/data-setup.dbr
+          fi
           if [ -n "$GROW" ]; then
             python3 scripts/seed-data-grow.py --gib "$GROW" "$CUR" seed/data-grow.dbr
             CUR=seed/data-grow.dbr
-          fi
-          if [ "$SKIP" = "true" ]; then
-            python3 scripts/seed-data-skip-setup.py "$CUR" seed/data-final.dbr
-            CUR=seed/data-final.dbr
           fi
           cp "$CUR" seed/sheng-data.dbr
           cp build/owner-data-fixture/seed.json seed/
