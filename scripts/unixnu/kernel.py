@@ -53,7 +53,10 @@ def build_archives(ctx, env):
     """
     if not ctx.need_config().get('XNU_BUILD_ARCHIVES'):
         return
-    entries = ctx.board.get('kernel', {}).get('archives', [])
+    entries = list(ctx.board.get('kernel', {}).get('archives', []))
+    # Extra builders after the board's, separated by ';' (for archives the board leaves to the owner, such as the
+    # verified-root policy bundles).
+    entries += [e.strip() for e in os.environ.get('UNIXNU_EXTRA_ARCHIVES', '').split(';') if e.strip()]
     env = dict(env, PATH=toolchain_path())
     for index, entry in enumerate(entries, 1):
         parts = shlex.split(entry)
