@@ -1,0 +1,120 @@
+name: Data seed
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_repository:
+        description: Device repository as owner/name
+        required: true
+        default: UniXNU/UniXNU-sheng
+      device_ref:
+        description: Device repository ref
+        required: true
+        default: main
+      defconfig:
+        description: Defconfig name
+        required: true
+        default: sheng_defconfig
+      volume_uuid:
+        description: Data volume UUID the kernel expects (CONFIG_XNU_OWNER_DATA_VOLUME_UUID)
+        required: true
+        default: 18AB5557-DC2D-469B-8758-855E60F5B0DF
+      grow_gib:
+        description: Grow the Data container to this many GiB (empty keeps 32 MiB)
+        required: false
+        default: "221"
+      skip_setup:
+        description: Mark Setup as done
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.device_repository }}
+          ref: ${{ inputs.device_ref }}
+          path: device
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch the OS disk image
+        run: |
+          ./unixnu defconfig "${{ inputs.defconfig }}" -D "$GITHUB_WORKSPACE/device"
+          ./unixnu ipsw fetch OS
+          git submodule update --init drivers/DarwinBoot
+
+      - name: Create the Data seed from the original private/var
+        run: |
+          DMG=$(ls out/ipsw/*/044-76040-038.dmg)
+          M=.cache/firmware/target-volumes/os-mount
+          mkdir -p "$M"
+          hdiutil attach -readonly -nobrowse -owners off -mountpoint "$M" "$DMG"
+          python3 scripts/prepare-owner-data-fixture.py --output "$PWD/build/owner-data-fixture"
+          hdiutil detach "$M"
+          cat build/owner-data-fixture/seed.json
+
+      - name: Set the volume UUID
+        env:
+          WANT: ${{ inputs.volume_uuid }}
+        run: |
+          IMG=build/owner-data-fixture/owner-data-32.cdr
+          OLD=$(python3 -c "import json;print(json.load(open('build/owner-data-fixture/seed.json'))['volume_uuid'])")
+          python3 scripts/set-apfs-volume-uuid.py "$IMG" "$OLD" "$WANT"
+          DEV=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount -readonly -nobrowse "$IMG" | head -1 | awk '{print $1}')
+          diskutil apfs list -plist > /tmp/apfs.plist
+          python3 - "$DEV" "$WANT" <<'EOF'
+          import plistlib, sys
+          dev, want = sys.argv[1].rsplit('/', 1)[1], sys.argv[2].upper()
+          found = [(v['APFSVolumeUUID'], v['DeviceIdentifier']) for c in plistlib.load(open('/tmp/apfs.plist', 'rb'))['Containers']
+                   if any(s['DeviceIdentifier'].startswith(dev) for s in c['PhysicalStores']) for v in c['Volumes']]
+          print('volumes on', dev, found)
+          if [u for u, _ in found] != [want]:
+              sys.exit('volume UUID was not changed')
+          open('/tmp/volume', 'w').write(found[0][1])
+          EOF
+          fsck_apfs -n "/dev/$(cat /tmp/volume)"
+          hdiutil detach "$DEV"
+
+      - name: Pack, grow and mark Setup done
+        env:
+          GROW: ${{ inputs.grow_gib }}
+          SKIP: ${{ inputs.skip_setup }}
+        run: |
+          mkdir -p seed
+          python3 drivers/DarwinBoot/Test/packed_ramdisk.py build/owner-data-fixture/owner-data-32.cdr seed/data.dbr
+          CUR=seed/data.dbr
+          if [ -n "$GROW" ]; then
+            python3 scripts/seed-data-grow.py --gib "$GROW" "$CUR" seed/data-grow.dbr
+            CUR=seed/data-grow.dbr
+          fi
+          if [ "$SKIP" = "true" ]; then
+            python3 scripts/seed-data-skip-setup.py "$CUR" seed/data-final.dbr
+            CUR=seed/data-final.dbr
+          fi
+          cp "$CUR" seed/sheng-data.dbr
+          cp build/owner-data-fixture/seed.json seed/
+          shasum -a 256 seed/*.dbr
+          ls -la seed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sheng-data-seed
+          path: |
+            seed/sheng-data.dbr
+            seed/seed.json
+          retention-days: 7
+
+      - name: Remove proprietary inputs
+        if: always()
+        run: rm -rf out/ipsw build seed .cache
