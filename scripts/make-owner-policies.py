@@ -82,19 +82,20 @@ def build(component, private, public):
         out = ROOT / ('build/verified-root-' + component)
         with source.open('rb', buffering=1024 * 1024) as stream:
             record = manifest.make(stream, size, private, public, volume_uuid, 1, out)
+        if record['image_sha256'] != spec['sha256'] or record['block_count'] != spec['blocks']:
+            raise SystemExit(f'{component}: image digest {record["image_sha256"]} / {record["block_count"]} blocks differ from the pin')
+        count = record['block_count']
+        indices = [0, 1, count // 2, count - 1]
+        samples, lengths = [], []
+        # Read the samples while the disk is still attached.
+        with source.open('rb', buffering=0) as stream:
+            for index in indices:
+                stream.seek(index * 4096)
+                block = stream.read(4096)[:min(4096, size - index * 4096)]
+                samples.append(block.ljust(4096, b'\0'))
+                lengths.append(len(block))
     finally:
         subprocess.run(['hdiutil', 'detach', whole], capture_output=True)
-    if record['image_sha256'] != spec['sha256'] or record['block_count'] != spec['blocks']:
-        raise SystemExit(f'{component}: image digest {record["image_sha256"]} / {record["block_count"]} blocks differ from the pin')
-    count = record['block_count']
-    indices = [0, 1, count // 2, count - 1]
-    samples, lengths = [], []
-    with source.open('rb', buffering=1024 * 1024) as stream:
-        for index in indices:
-            stream.seek(index * 4096)
-            block = stream.read(min(4096, size - index * 4096))
-            samples.append(block.ljust(4096, b'\0'))
-            lengths.append(len(block))
     if component == 'os' and lengths != [4096, 4096, 4096, 1536]:
         raise SystemExit(f'Unexpected OS sample lengths {lengths}')
     (out / 'original-samples.bin').write_bytes(b''.join(samples))
