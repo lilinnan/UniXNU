@@ -1,0 +1,20 @@
+--- a/NvtProtocol.c
++++ b/NvtProtocol.c
+@@ -164,10 +164,17 @@
+ }
+ static int check_reset_state(struct nvt_chip *c) {
+     unsigned max=c->reset_retries?c->reset_retries:10;
++    // A cascade chip whose trim id selects the NT36532 map can still run firmware built for the NT36532E layout,
++    // whose event buffer is elsewhere: poll both and keep the map whose buffer reports the reset state.
++    const struct nvt_map *alternate=c->map==&map_cascade?&map_e_cascade:c->map==&map_e_cascade?&map_cascade:0;
+     for (unsigned retry=0;retry<=max;++retry) {
+         uint8_t b[6]={0};int r=nvt_read(c,c->map->event_buf+EVENT_RESET_COMPLETE,b,5);if (r) return r;
+         memcpy(c->dl_reset_state,b,5);c->dl_polls=retry+1;
+         if (b[0]>=RESET_STATE_INIT && b[0]<=RESET_STATE_MAX) return 0;
++        if (alternate) {
++            uint8_t a[6]={0};r=nvt_read(c,alternate->event_buf+EVENT_RESET_COMPLETE,a,5);if (r) return r;
++            if (a[0]>=RESET_STATE_INIT && a[0]<=RESET_STATE_MAX) {memcpy(c->dl_reset_state,a,5);c->map=alternate;return 0;}
++        }
+         delay(c,10);
+     }
+     return NVT_ERR_TIMEOUT;
