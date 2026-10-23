@@ -47,8 +47,14 @@ def keys():
 def attach(dmg):
     out = subprocess.run(['hdiutil', 'attach', '-nomount', '-readonly', '-noverify', '-noautofsck', '-plist', str(dmg)],
                          capture_output=True, check=True).stdout
-    devices = [e['dev-entry'] for e in plistlib.loads(out)['system-entities']]
-    whole = min(devices, key=len)
+    entities = plistlib.loads(out)['system-entities']
+    # The whole virtual disk is the GUID partition scheme entity; newer macOS also lists the synthesized APFS
+    # container (a separate /dev/diskN of the partition size), so the shortest name is not enough.
+    whole = [e['dev-entry'] for e in entities if e.get('content-hint') == 'GUID_partition_scheme']
+    if len(whole) > 1:
+        raise SystemExit(f'Expected one GUID partition scheme entity, found {entities}')
+    # Without a partition map (a bare APFS image) keep the earlier rule: the first, shortest device name.
+    whole = whole[0] if whole else min((e['dev-entry'] for e in entities), key=len)
     name = Path(whole).name
     # APFS volume UUIDs of the containers whose physical store is on this attached disk.
     uuids = []
