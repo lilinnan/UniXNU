@@ -1,1 +1,40 @@
-
+diff --git a/package/BootProgress.c b/package/BootProgress.c
+index 729d3e3..66c2e67 100644
+--- a/package/BootProgress.c
++++ b/package/BootProgress.c
+@@ -87,6 +87,7 @@ static unsigned render_busy;
+ // boot-diag-resume=<seconds>: after the OS stops scanning out frames for that long, take the panel back for
+ // the diagnostic page. Any new validated scanout yields it again through boot_progress_prepare_scanout.
+ static unsigned resume_after,last_scanout_at;
++static unsigned diag_touch;   // sheng-diag-touch=1: rows 31-41 show the touch probe's detail rows
+ static char build_tag[32];
+ const char *boot_progress_tag(void) { return build_tag; }
+ static struct bp_pulse pulse;
+@@ -147,6 +148,7 @@ extern void sheng_cpufreq_poll(void) __attribute__((weak_import));
+ extern char boot_process_rows[10][120] __attribute__((weak_import));
+ extern unsigned boot_ui_trace_role_rows(unsigned,char [][120],unsigned,unsigned) __attribute__((weak_import));
+ extern char native_touch_rows[4][120] __attribute__((weak_import));
++extern char native_touch_trace[8][120] __attribute__((weak_import));
+ extern char native_cpufreq_row[120] __attribute__((weak_import));
+ extern volatile uint32_t native_hid_input_events[8] __attribute__((weak_import));
+ extern volatile int native_hid_input_results[8] __attribute__((weak_import));
+@@ -508,6 +510,11 @@ static void draw(unsigned now) {
+     }
+     if(col && row<48) { b[col]=0;line(row,b,0xffaaaaaa); }
+   }
++  if (diag_touch && !visible->frozen && &native_touch_rows && &native_touch_trace) {
++    // Replace rows 31-41 (display, memory and UFS detail) with the touch probe rows the summary row leaves out.
++    for (unsigned i=1;i<4;++i) line(30+i,native_touch_rows[i],0xff00ffcc);
++    for (unsigned i=0;i<8;++i) line(34+i,native_touch_trace[i],0xff66ffff);
++  }
+   __asm__ volatile("dsb sy" ::: "memory");
+   last_draw=now;
+ }
+@@ -579,6 +586,7 @@ void boot_progress_init(void) {
+   state.continuous=opt==2; enabled=opt;
+   PE_parse_boot_argn("sheng-build-tag",build_tag,sizeof(build_tag));build_tag[sizeof(build_tag)-1]=0;
+   if (PE_parse_boot_argn("boot-diag-resume",&resume_after,sizeof(resume_after)) && (resume_after<5 || resume_after>3600)) resume_after=0;
++  PE_parse_boot_argn("sheng-diag-touch",&diag_touch,sizeof(diag_touch));
+   boot_progress_stage("PE initialized; early native mappings");
+ }
+ void boot_progress_bind(uintptr_t base,unsigned w,unsigned h,unsigned rb,unsigned depth) {
